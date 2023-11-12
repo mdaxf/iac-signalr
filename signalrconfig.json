@@ -1,0 +1,26 @@
+{
+    "address": "0.0.0.0:8222",
+    "clients": "http://127.0.0.1:8080,https://127.0.0.1:8080",
+    "log":{
+        "adapter": "console", 
+        "level": "debug",
+        "file":{
+            "folder": "c:\\\\temp\\\\iac_loger", 
+            "file": "iac.log",
+            "maxlines":10000,
+            "maxsize": 1024},
+        "console":{},
+        "multiplefile":{
+            "folder": "c:\\\\temp\\\\iac_loger", 
+            "file": "iac.log",
+            "maxlines":10000,
+            "maxsize": 1024,
+            "maxfiles": 10
+        },
+        "documentdb":{
+            "conn": "mongodb://localhost:27017",
+            "db": "IAC_CACHE",
+            "collection": "logger"
+        }
+    }
+}

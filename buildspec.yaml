@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      go: 1.21  # Specify the desired Go version
+
+  pre_build:
+    commands:
+      - go mod download
+
+  build:
+    commands:
+      - go build -o signalrsrv-linux
+
+artifacts:
+  files:
+    - signalrsrv-linux
+    - signalRconfig.json
+    - public/*
