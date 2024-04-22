@@ -1,6 +1,10 @@
 {
     "address": "0.0.0.0:8222",
     "clients": "http://127.0.0.1:8080,https://127.0.0.1:8080",
+    "appserver":{
+        "url": "http://127.0.0.1:8080",
+        "apikey": "ahbcgj"
+    },
     "log":{
         "adapter": "console", 
         "level": "debug",

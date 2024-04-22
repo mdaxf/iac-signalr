@@ -11,10 +11,10 @@ phases:
 
   build:
     commands:
-      - go build -o signalrsrv-linux
+      - go build -o iac-signalr-linux
 
 artifacts:
   files:
-    - signalrsrv-linux
+    - iac-signalr-linux
     - signalRconfig.json
     - public/*
