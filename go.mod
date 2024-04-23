@@ -1,20 +1,20 @@
 module github.com/mdaxf/iac-signalr
 
-go 1.21.1
+go 1.21.4
 
 require (
-	github.com/cenkalti/backoff/v4 v4.2.1
+	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/dave/jennifer v1.7.0
 	github.com/go-kit/log v0.2.1
-	github.com/google/uuid v1.4.0
-	github.com/gorilla/websocket v1.5.0
-	github.com/mdaxf/iac v0.0.0-20240421173856-1ac49e5902fe
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.1
+	github.com/mdaxf/iac v0.0.0-20240422034815-9b6897a04222
 	github.com/onsi/ginkgo v1.16.5
-	github.com/onsi/gomega v1.28.0
-	github.com/stretchr/testify v1.8.4
+	github.com/onsi/gomega v1.33.0
+	github.com/stretchr/testify v1.9.0
 	github.com/teivah/onecontext v1.3.0
-	github.com/vmihailenco/msgpack/v5 v5.4.0
-	nhooyr.io/websocket v1.8.7
+	github.com/vmihailenco/msgpack/v5 v5.4.1
+	nhooyr.io/websocket v1.8.11
 )
 
 require (
@@ -31,7 +31,7 @@ require (
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
 	github.com/eclipse/paho.mqtt.golang v1.4.3 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
+	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/gin-gonic/gin v1.9.1 // indirect
@@ -86,12 +86,12 @@ require (
 	go.opentelemetry.io/otel v1.20.0 // indirect
 	go.opentelemetry.io/otel/trace v1.20.0 // indirect
 	golang.org/x/arch v0.5.0 // indirect
-	golang.org/x/crypto v0.19.0 // indirect
-	golang.org/x/net v0.21.0 // indirect
+	golang.org/x/crypto v0.21.0 // indirect
+	golang.org/x/net v0.23.0 // indirect
 	golang.org/x/sync v0.6.0 // indirect
-	golang.org/x/sys v0.17.0 // indirect
+	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/sourcemap.v1 v1.0.5 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
