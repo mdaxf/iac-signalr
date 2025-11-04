@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/mdaxf/iac-signalr/logger"
 )
 
 func EnableCors(w *http.ResponseWriter) {
@@ -13,25 +16,39 @@ func EnableCors(w *http.ResponseWriter) {
 	(*w).Header().Set("Access-Control-Allow-Credentials", "true")
 }
 
-// LogRequests writes simple request logs to STDOUT so that we can see what requests the server is handling
-func LogRequests(h http.Handler) http.Handler {
-	// type our middleware as an http.HandlerFunc so that it is seen as an http.Handler
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// wrap the original response writer so we can capture response details
-		wrappedWriter := wrapResponseWriter(w)
-		start := time.Now() // request start time
-		EnableCors(&w)
-		// serve the inner request
-		h.ServeHTTP(wrappedWriter, r)
+// LogRequests logs HTTP requests with structured logging and request correlation
+func LogRequests(ilog logger.Log) func(http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Generate request ID for correlation
+			requestID := uuid.New().String()
+			w.Header().Set("X-Request-ID", requestID)
 
-		// extract request/response details
-		status := wrappedWriter.status
-		uri := r.URL.String()
-		method := r.Method
-		duration := time.Since(start)
+			wrappedWriter := wrapResponseWriter(w)
+			start := time.Now()
 
-		fmt.Println(w.Header(), r.Header, r.Body)
-		// write to console
-		fmt.Printf("%03d %s %s %v \n", status, method, uri, duration)
-	})
+			EnableCors(&w)
+
+			// Log incoming request
+			ilog.Info(fmt.Sprintf("HTTP Request - requestID=%s method=%s uri=%s remoteAddr=%s",
+				requestID, r.Method, r.URL.String(), r.RemoteAddr))
+
+			h.ServeHTTP(wrappedWriter, r)
+
+			status := wrappedWriter.status
+			duration := time.Since(start)
+
+			// Log completed request with appropriate level based on status code
+			logMsg := fmt.Sprintf("HTTP Response - requestID=%s status=%d method=%s uri=%s duration=%v",
+				requestID, status, r.Method, r.URL.String(), duration)
+
+			if status >= 500 {
+				ilog.Error(logMsg)
+			} else if status >= 400 {
+				ilog.Warn(logMsg)
+			} else {
+				ilog.Info(logMsg)
+			}
+		})
+	}
 }

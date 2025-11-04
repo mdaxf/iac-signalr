@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	//	"log"
 
@@ -41,14 +43,32 @@ type Config struct {
 	Log       map[string]interface{} `json:"log"`
 }
 
+// HealthStatus represents the overall health status of the server
+type HealthStatus struct {
+	Status            string                 `json:"status"` // "healthy", "degraded", "unhealthy"
+	Timestamp         time.Time              `json:"timestamp"`
+	Node              map[string]interface{} `json:"node"`
+	Uptime            string                 `json:"uptime"`
+	ActiveConnections int                    `json:"activeConnections"`
+	TotalConnections  uint64                 `json:"totalConnections"`
+	Checks            map[string]CheckResult `json:"checks"`
+}
+
+// CheckResult represents the result of a single health check
+type CheckResult struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
 var ilog logger.Log
 var nodedata map[string]interface{}
+var globalHub *IACMessageBus // Store reference to hub for health checks
 
 var IACMessageBusName = "/iacmessagebus"
 var SignalRConfig Config
 
-func runHTTPServer(address string, hub signalr.HubInterface, clients string) {
-	server, _ := signalr.NewServer(context.TODO(), signalr.SimpleHubFactory(hub),
+func runHTTPServer(address string, hub signalr.HubInterface, clients string) *http.Server {
+	signalrServer, _ := signalr.NewServer(context.TODO(), signalr.SimpleHubFactory(hub),
 		signalr.Logger(kitlog.NewLogfmtLogger(os.Stdout), false),
 		signalr.KeepAliveInterval(10*time.Second), signalr.AllowOriginPatterns([]string{clients}),
 		signalr.InsecureSkipVerify(true))
@@ -57,7 +77,7 @@ func runHTTPServer(address string, hub signalr.HubInterface, clients string) {
 
 	router := http.NewServeMux()
 
-	server.MapHTTP(signalr.WithHTTPServeMux(router), IACMessageBusName)
+	signalrServer.MapHTTP(signalr.WithHTTPServeMux(router), IACMessageBusName)
 
 	ilog.Info(fmt.Sprintf("Serving public content from the embedded filesystem\n"))
 	router.Handle("/", http.FileServer(http.FS(public.FS)))
@@ -67,30 +87,83 @@ func runHTTPServer(address string, hub signalr.HubInterface, clients string) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if r.Header.Get("Authorization") != "apikey "+SignalRConfig.AppServer["apikey"].(string) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
+
+		// Optional authentication - only enforce if Authorization header is present
+		if auth := r.Header.Get("Authorization"); auth != "" {
+			if auth != "apikey "+SignalRConfig.AppServer["apikey"].(string) {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
+
+		// Build health status response
+		healthStatus := HealthStatus{
+			Status:    "healthy",
+			Timestamp: time.Now().UTC(),
+			Node:      nodedata,
+			Checks:    make(map[string]CheckResult),
+		}
+
+		// Add uptime
+		if startTime, ok := nodedata["StartTime"].(time.Time); ok {
+			healthStatus.Uptime = time.Since(startTime).String()
+		}
+
+		// Add connection metrics if hub is available
+		if globalHub != nil {
+			healthStatus.ActiveConnections = globalHub.GetConnectionCount()
+			healthStatus.TotalConnections = globalHub.GetTotalConnections()
+		}
+
+		// Check SignalR server status
 		result, err := CheckServiceStatus(ilog, SignalRConfig)
 		if err != nil {
-			ilog.Error(fmt.Sprintf("HeartBeat error: %v", err))
+			healthStatus.Status = "degraded"
+			healthStatus.Checks["signalr"] = CheckResult{
+				Status:  "unhealthy",
+				Message: err.Error(),
+			}
+			ilog.Warn(fmt.Sprintf("Health check - SignalR server check failed: %v", err))
+		} else {
+			healthStatus.Checks["signalr"] = CheckResult{Status: "healthy"}
 		}
 
-		data := make(map[string]interface{})
-		data["Node"] = nodedata
-		data["Result"] = result
-		data["ServiceStatus"] = make(map[string]interface{})
-		data["timestamp"] = time.Now().UTC()
+		// Check app server connectivity
+		if err := checkAppServerConnectivity(SignalRConfig); err != nil {
+			healthStatus.Status = "degraded"
+			healthStatus.Checks["appserver"] = CheckResult{
+				Status:  "unhealthy",
+				Message: err.Error(),
+			}
+			ilog.Warn(fmt.Sprintf("Health check - AppServer connectivity failed: %v", err))
+		} else {
+			healthStatus.Checks["appserver"] = CheckResult{Status: "healthy"}
+		}
 
+		// Determine HTTP status code based on health status
+		statusCode := http.StatusOK
+		if healthStatus.Status == "unhealthy" {
+			statusCode = http.StatusServiceUnavailable
+		}
+
+		// Send response
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(healthStatus)
 	})
 
-	ilog.Info(fmt.Sprintf("Listening for websocket connections on %s %s", "Address:", address))
-	//	fmt.Printf("Listening for websocket connections on http://%s\n", address)
-	if err := http.ListenAndServe(address, middleware.LogRequests(router)); err != nil {
-		ilog.Error(fmt.Sprintf("ListenAndServe: %s", err))
+	// Create HTTP server with explicit configuration
+	srv := &http.Server{
+		Addr:         address,
+		Handler:      middleware.LogRequests(ilog)(router),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	ilog.Info(fmt.Sprintf("HTTP server configured - address=%s readTimeout=15s writeTimeout=15s idleTimeout=60s", address))
+
+	return srv
 }
 
 func runHTTPClient(address string, receiver interface{}) error {
@@ -125,13 +198,15 @@ func main() {
 	appconfig := "signalrconfig.json"
 	data, err := ioutil.ReadFile(appconfig)
 	if err != nil {
-		fmt.Errorf("failed to read configuration file: %v", err)
+		fmt.Fprintf(os.Stderr, "FATAL: Failed to read configuration file '%s': %v\n", appconfig, err)
+		os.Exit(1)
 	}
 
 	var config Config
 
 	if err := json.Unmarshal(data, &config); err != nil {
-		fmt.Errorf("failed to parse configuration file: %v", err)
+		fmt.Fprintf(os.Stderr, "FATAL: Failed to parse configuration file '%s': %v\n", appconfig, err)
+		os.Exit(1)
 	}
 	SignalRConfig = config
 	address := config.Address
@@ -151,23 +226,24 @@ func main() {
 	ilog = logger.Log{ModuleName: logger.SignalR, User: "mdaxf/iac", ControllerName: "Signalr Server"}
 	logger.Init(config.Log)
 
+	// Validate configuration
+	if err := validateConfig(&config); err != nil {
+		ilog.Critical(fmt.Sprintf("FATAL: Invalid configuration: %v", err))
+		os.Exit(1)
+	}
+
 	ilog.Info(fmt.Sprintf("Starting SignalR Server Address: %s, allow Clients: %s", address, clients))
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		//	url := "http://" + address + IACMessageBusName
-		hub := &IACMessageBus{
-			ilog: ilog,
-		}
+	// Create the hub
+	hub := &IACMessageBus{
+		ilog: ilog,
+	}
 
-		go runHTTPServer(address, hub, clients)
-		<-time.After(time.Millisecond * 2)
-		/*	go func() {
-			fmt.Println(runHTTPClient(url, &receiver{}))
-		}() */
-	}()
+	// Store hub reference for health checks
+	globalHub = hub
+
+	// Create HTTP server
+	srv := runHTTPServer(address, hub, clients)
 
 	hip, err := GetHostandIPAddress()
 
@@ -204,20 +280,55 @@ func main() {
 			nodedata["healthapi"] = fmt.Sprintf("http://%s:%d/health", hip["Host"], port)
 		}
 	}
-	// Start the heartbeat
-	wg.Add(1)
+	// Start HTTP server in goroutine
 	go func() {
-		defer wg.Done()
-		for {
-			HeartBeat(ilog, config)
-			time.Sleep(5 * time.Minute)
+		ilog.Info(fmt.Sprintf("Starting HTTP server on %s", address))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			ilog.Error(fmt.Sprintf("HTTP server error: %v", err))
+			os.Exit(1)
 		}
 	}()
 
-	wg.Wait()
+	// Start the heartbeat in goroutine
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
 
-	ch := make(chan struct{})
-	<-ch
+		for {
+			select {
+			case <-ticker.C:
+				HeartBeat(ilog, config)
+			case <-heartbeatDone:
+				ilog.Info("Heartbeat stopped")
+				return
+			}
+		}
+	}()
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Wait for interrupt signal
+	sig := <-sigChan
+	ilog.Info(fmt.Sprintf("Received signal: %v, initiating graceful shutdown", sig))
+
+	// Stop heartbeat
+	close(heartbeatDone)
+
+	// Create shutdown context with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	// Attempt graceful shutdown
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		ilog.Error(fmt.Sprintf("Server forced to shutdown: %v", err))
+		os.Exit(1)
+	}
+
+	ilog.Info("Server exited gracefully")
 }
 
 func HeartBeat(ilog logger.Log, gconfig Config) {
@@ -241,7 +352,11 @@ func HeartBeat(ilog logger.Log, gconfig Config) {
 	headers["Content-Type"] = "application/json"
 	headers["Authorization"] = "apikey " + gconfig.AppServer["apikey"].(string)
 
-	_, err = CallWebService(appHeartBeatUrl, "POST", data, headers)
+	// Create context with timeout for heartbeat request
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err = CallWebService(ctx, appHeartBeatUrl, "POST", data, headers, 30*time.Second)
 
 	if err != nil {
 		ilog.Error(fmt.Sprintf("HeartBeat error: %v", err))
@@ -264,56 +379,129 @@ func CheckServiceStatus(iLog logger.Log, config Config) (map[string]interface{},
 	return result, nil
 }
 
-func CallWebService(url string, method string, data map[string]interface{}, headers map[string]string) (map[string]interface{}, error) {
+func CallWebService(ctx context.Context, url string, method string, data map[string]interface{}, headers map[string]string, timeout time.Duration) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	// Create a new HTTP client
-	client := &http.Client{}
+
+	// Create context with timeout if not already set
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: timeout,
+	}
 
 	bytesdata, err := json.Marshal(data)
 	if err != nil {
-		//	fmt.Error(fmt.Sprintf("Error:", err))
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal request data: %w", err)
 	}
 
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(bytesdata))
-
+	// Create request with context
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(bytesdata))
 	if err != nil {
-		//	fmt.Error("Error in WebServiceCallFunc.Execute: %s", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	// Set headers
 	if headers != nil {
 		for key, value := range headers {
 			req.Header.Set(key, value)
 		}
 	}
 
+	// Execute request
 	resp, err := client.Do(req)
 	if err != nil {
-		//	fmt.Error("Error in WebServiceCallFunc.Execute: %s", err)
-		return nil, err
+		// Check for context deadline exceeded
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("request timeout exceeded: %w", err)
+		}
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := ioutil.ReadAll(resp.Body)
-	err = json.Unmarshal(respBody, &result)
-	if err != nil {
-		//	fmt.Error(fmt.Sprintf("Error:", err))
-		return nil, err
+	// Check HTTP status
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
-	//	fmt.printf("Response data: %v", result)
+
+	// Read response body
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Unmarshal response
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
 	return result, nil
 }
+
+// checkAppServerConnectivity checks if the app server is reachable
+func checkAppServerConnectivity(config Config) error {
+	if config.AppServer == nil || config.AppServer["url"] == nil {
+		return fmt.Errorf("app server not configured")
+	}
+
+	url := config.AppServer["url"].(string)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("connection failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Any response is considered success (server is reachable)
+	return nil
+}
+
+// validateConfig validates the configuration and returns an error if invalid
+func validateConfig(config *Config) error {
+	if config.Address == "" {
+		return fmt.Errorf("address is required")
+	}
+	if config.AppServer == nil {
+		return fmt.Errorf("appserver configuration is required")
+	}
+	if config.AppServer["url"] == nil || config.AppServer["url"] == "" {
+		return fmt.Errorf("appserver.url is required")
+	}
+	if config.AppServer["apikey"] == nil || config.AppServer["apikey"] == "" {
+		return fmt.Errorf("appserver.apikey is required")
+	}
+	if config.Clients == "" {
+		return fmt.Errorf("clients configuration is required")
+	}
+	return nil
+}
+
 func GetHostandIPAddress() (map[string]interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		fmt.Println("Error getting hostname:", err)
+		ilog.Error(fmt.Sprintf("Error getting hostname: %v", err))
 		return nil, err
 	}
-	fmt.Println("Hostname: %s", hostname)
+	ilog.Info(fmt.Sprintf("Hostname: %s", hostname))
 
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		fmt.Println("Error getting IP addresses:", err)
+		ilog.Error(fmt.Sprintf("Error getting IP addresses: %v", err))
 		return nil, err
 	}
 	var ipnet *net.IPNet
@@ -321,9 +509,9 @@ func GetHostandIPAddress() (map[string]interface{}, error) {
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil {
-				fmt.Println("IPv4 address:", ipnet.IP.String())
+				ilog.Debug(fmt.Sprintf("Network interface found - type=IPv4 address=%s", ipnet.IP.String()))
 			} else {
-				fmt.Println("IPv6 address:", ipnet.IP.String())
+				ilog.Debug(fmt.Sprintf("Network interface found - type=IPv6 address=%s", ipnet.IP.String()))
 			}
 		}
 	}
