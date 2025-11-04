@@ -56,7 +56,7 @@ func (c *IACMessageBus) SendToBackEnd(topic string, message string, connectionID
 }
 
 func (c *IACMessageBus) AddMessage(message string, topic string, sender string) {
-	ilog.Debug(fmt.Sprintf("AddMessage: topic: %s, message: %s, sender: %s\n", topic, message, sender))
+	c.ilog.Debug(fmt.Sprintf("AddMessage: topic: %s, message: %s, sender: %s\n", topic, message, sender))
 	c.Clients().Group(groupname).Send(topic, message)
 }
 
@@ -70,7 +70,7 @@ func (c *IACMessageBus) OnConnected(connectionID string) {
 func (c *IACMessageBus) OnDisconnected(connectionID string) {
 	c.ilog.Debug(fmt.Sprintf("%s disconnected\n", connectionID))
 	c.Groups().RemoveFromGroup(groupname, connectionID)
-	ilog.Debug(fmt.Sprintf("%s disconnected and removed from group %s\n", connectionID, groupname))
+	c.ilog.Debug(fmt.Sprintf("%s disconnected and removed from group %s\n", connectionID, groupname))
 }
 
 func (c *IACMessageBus) Broadcast(message string) {

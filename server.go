@@ -147,7 +147,8 @@ func main() {
 	nodedata["Status"] = "Running"
 	nodedata["StartTime"] = time.Now().UTC()
 
-	ilog := logger.Log{ModuleName: logger.SignalR, User: "System", ControllerName: "Signalr Server"}
+	// Initialize global logger with user mdaxf/iac for proper logging attribution
+	ilog = logger.Log{ModuleName: logger.SignalR, User: "mdaxf/iac", ControllerName: "Signalr Server"}
 	logger.Init(config.Log)
 
 	ilog.Info(fmt.Sprintf("Starting SignalR Server Address: %s, allow Clients: %s", address, clients))
@@ -220,7 +221,8 @@ func main() {
 }
 
 func HeartBeat(ilog logger.Log, gconfig Config) {
-	ilog.Debug("Start HeartBeat for iac-activemq application with appid: " + nodedata["AppID"].(string))
+	// Reduced heartbeat debug logging to minimize log noise
+	// ilog.Debug("Start HeartBeat for iac-activemq application with appid: " + nodedata["AppID"].(string))
 	appHeartBeatUrl := gconfig.AppServer["url"].(string) + "/IACComponents/heartbeat"
 	//ilog.Debug("HeartBeat URL: " + appHeartBeatUrl)
 
@@ -250,7 +252,8 @@ func HeartBeat(ilog logger.Log, gconfig Config) {
 }
 
 func CheckServiceStatus(iLog logger.Log, config Config) (map[string]interface{}, error) {
-	iLog.Debug("Check SignalR Server Status")
+	// Reduced heartbeat debug logging to minimize log noise
+	// iLog.Debug("Check SignalR Server Status")
 
 	result, err := health.CheckSignalRServerHealth(nodedata, "http://"+config.Address, "ws:"+config.Address)
 	if err != nil {
