@@ -179,7 +179,7 @@ func (w *PipeWriter) CloseWithError(err error) error {
 // It can be used to connect code expecting an io.Reader
 // with code expecting an io.Writer.
 //
-// By canceling the context, Read and Write can be canceled
+// # By canceling the context, Read and Write can be canceled
 //
 // Reads and Writes on the pipe are matched one to one
 // except when multiple Reads are needed to consume a single Write.

@@ -45,9 +45,13 @@ func (cb *ConnectionBase) SetConnectionID(id string) {
 // ReadWriteWithContext is a wrapper to make blocking io.Writer / io.Reader cancelable.
 // It can be used to implement cancellation of connections.
 // ReadWriteWithContext will return when either the Read/Write operation has ended or ctx has been canceled.
-//  doRW func() (int, error)
+//
+//	doRW func() (int, error)
+//
 // doRW should contain the Read/Write operation.
-//  unblockRW func()
+//
+//	unblockRW func()
+//
 // unblockRW should contain the operation to unblock the Read/Write operation.
 // If there is no way to unblock the operation, one goroutine will leak when ctx is canceled.
 // As the standard use case when ReadWriteWithContext is canceled is the cancellation of a connection this leak

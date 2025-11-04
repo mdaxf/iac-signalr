@@ -1,9 +1,13 @@
 package signalr
 
 // ReceiverInterface allows receivers to interact with the server directly from the receiver methods
-//  Init(Client)
+//
+//	Init(Client)
+//
 // Init is used by the Client to connect the receiver to the server.
-//  Server() Client
+//
+//	Server() Client
+//
 // Server can be used inside receiver methods to call Client methods,
 // e.g. Client.Send, Client.Invoke, Client.PullStream and Client.PushStreams
 type ReceiverInterface interface {

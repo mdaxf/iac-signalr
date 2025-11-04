@@ -48,7 +48,7 @@ func (c *clientStreamHub) UploadStreamSmoke(upload1 <-chan int, factor float64, 
 	}
 }
 
-//noinspection GoUnusedParameter
+// noinspection GoUnusedParameter
 func (c *clientStreamHub) UploadPanic(upload <-chan string) {
 	c.SendResult("Panic()")
 	panic("Don't panic!")
@@ -61,7 +61,7 @@ func (c *clientStreamHub) UploadInt(upload <-chan int) {
 	}
 }
 
-//noinspection GoUnusedParameter
+// noinspection GoUnusedParameter
 func (c *clientStreamHub) UploadHang(upload <-chan int) {
 	c.SendResult("UploadHang()")
 	// wait forever
