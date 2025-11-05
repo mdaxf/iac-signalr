@@ -316,11 +316,12 @@ func GetHostandIPAddress() (map[string]interface{}, error) {
 	var ipnet *net.IPNet
 
 	for _, addr := range addrs {
-		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				fmt.Println("IPv4 address:", ipnet.IP.String())
+		if ip, ok := addr.(*net.IPNet); ok && !ip.IP.IsLoopback() {
+			ipnet = ip
+			if ip.IP.To4() != nil {
+				fmt.Println("IPv4 address:", ip.IP.String())
 			} else {
-				fmt.Println("IPv6 address:", ipnet.IP.String())
+				fmt.Println("IPv6 address:", ip.IP.String())
 			}
 		}
 	}
@@ -330,7 +331,9 @@ func GetHostandIPAddress() (map[string]interface{}, error) {
 	nodedata := make(map[string]interface{})
 	nodedata["Host"] = hostname
 	nodedata["OS"] = osName
-	nodedata["IPAddress"] = ipnet.IP.String()
+	if ipnet != nil {
+		nodedata["IPAddress"] = ipnet.IP.String()
+	}
 
 	return nodedata, nil
 }
