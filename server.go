@@ -3,28 +3,20 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
+	"net/http"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-
-	//	"log"
-
-	//	"strings"
-
-	//	"net"
-	"net/http"
-	"os"
 	"time"
 
-	//	"github.com/rs/cors"
-
-	kitlog "github.com/go-kit/log"
 	"github.com/google/uuid"
 
 	"github.com/mdaxf/iac-signalr/logger"
@@ -35,10 +27,11 @@ import (
 )
 
 type Config struct {
-	Address   string                 `json:"address"`
-	Clients   string                 `json:"clients"`
-	AppServer map[string]interface{} `json:"appserver"`
-	Log       map[string]interface{} `json:"log"`
+	Address            string                 `json:"address"`
+	Clients            string                 `json:"clients"`
+	AppServer          map[string]interface{} `json:"appserver"`
+	Log                map[string]interface{} `json:"log"`
+	InsecureSkipVerify bool                   `json:"insecureSkipVerify"`
 }
 
 var ilog logger.Log
@@ -47,11 +40,47 @@ var nodedata map[string]interface{}
 var IACMessageBusName = "/iacmessagebus"
 var SignalRConfig Config
 
-func runHTTPServer(address string, hub signalr.HubInterface, clients string) {
-	server, _ := signalr.NewServer(context.TODO(), signalr.SimpleHubFactory(hub),
-		signalr.Logger(kitlog.NewLogfmtLogger(os.Stdout), false),
+// getEnv retrieves an environment variable or returns a default value
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getAPIKey retrieves API key from environment variable or config
+func getAPIKey(config Config) string {
+	// First try environment variable for security
+	if apiKey := os.Getenv("SIGNALR_API_KEY"); apiKey != "" {
+		return apiKey
+	}
+	// Fall back to config (not recommended for production)
+	if config.AppServer != nil {
+		if apiKey, ok := config.AppServer["apikey"].(string); ok {
+			return apiKey
+		}
+	}
+	return ""
+}
+
+// secureCompare performs constant-time comparison to prevent timing attacks
+func secureCompare(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func runHTTPServer(address string, hub signalr.HubInterface, clients string, insecureSkipVerify bool) {
+	// Create SignalR logger adapter
+	logAdapter := logger.NewSignalRLogAdapter(ilog)
+
+	server, err := signalr.NewServer(context.TODO(), signalr.SimpleHubFactory(hub),
+		signalr.Logger(logAdapter, false),
 		signalr.KeepAliveInterval(10*time.Second), signalr.AllowOriginPatterns([]string{clients}),
-		signalr.InsecureSkipVerify(true))
+		signalr.InsecureSkipVerify(insecureSkipVerify))
+
+	if err != nil {
+		ilog.Error(fmt.Sprintf("Failed to create SignalR server: %v", err))
+		return
+	}
 
 	signalr.AllowedClients = clients
 
@@ -67,7 +96,10 @@ func runHTTPServer(address string, hub signalr.HubInterface, clients string) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if r.Header.Get("Authorization") != "apikey "+SignalRConfig.AppServer["apikey"].(string) {
+		// Secure API key comparison using constant time comparison
+		expectedAuth := "apikey " + getAPIKey(SignalRConfig)
+		actualAuth := r.Header.Get("Authorization")
+		if !secureCompare(expectedAuth, actualAuth) {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -93,20 +125,21 @@ func runHTTPServer(address string, hub signalr.HubInterface, clients string) {
 	}
 }
 
-func runHTTPClient(address string, receiver interface{}) error {
+func runHTTPClient(address string, receiver interface{}, logAdapter *logger.SignalRLogAdapter) error {
 	c, err := signalr.NewClient(context.Background(), nil,
 		signalr.WithReceiver(receiver),
 		signalr.WithConnector(func() (signalr.Connection, error) {
-			creationCtx, _ := context.WithTimeout(context.Background(), 2*time.Second)
+			creationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
 			return signalr.NewHTTPConnection(creationCtx, address)
 		}),
-		signalr.Logger(kitlog.NewLogfmtLogger(os.Stdout), false))
+		signalr.Logger(logAdapter, false))
 	if err != nil {
 		return err
 	}
 	c.Start()
 
-	fmt.Println("Client started")
+	ilog.Info("SignalR client started")
 
 	return nil
 }
@@ -122,20 +155,35 @@ func (r *receiver) Receive(msg string) {
 }
 
 func main() {
-	appconfig := "signalrconfig.json"
-	data, err := ioutil.ReadFile(appconfig)
+	// Support environment variable for config file path
+	appconfig := getEnv("SIGNALR_CONFIG", "signalrconfig.json")
+
+	data, err := os.ReadFile(appconfig)
 	if err != nil {
-		fmt.Errorf("failed to read configuration file: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to read configuration file '%s': %v\n", appconfig, err)
+		os.Exit(1)
 	}
 
 	var config Config
 
 	if err := json.Unmarshal(data, &config); err != nil {
-		fmt.Errorf("failed to parse configuration file: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to parse configuration file: %v\n", err)
+		os.Exit(1)
 	}
+
+	// Override config with environment variables if set
+	if envAddress := os.Getenv("SIGNALR_ADDRESS"); envAddress != "" {
+		config.Address = envAddress
+	}
+	if envClients := os.Getenv("SIGNALR_CLIENTS"); envClients != "" {
+		config.Clients = envClients
+	}
+	if envInsecure := os.Getenv("SIGNALR_INSECURE_SKIP_VERIFY"); envInsecure == "true" {
+		config.InsecureSkipVerify = true
+	}
+
 	SignalRConfig = config
 	address := config.Address
-
 	clients := config.Clients
 
 	nodedata = make(map[string]interface{})
@@ -161,7 +209,7 @@ func main() {
 			ilog: ilog,
 		}
 
-		go runHTTPServer(address, hub, clients)
+		go runHTTPServer(address, hub, clients, config.InsecureSkipVerify)
 		<-time.After(time.Millisecond * 2)
 		/*	go func() {
 			fmt.Println(runHTTPClient(url, &receiver{}))
@@ -237,7 +285,7 @@ func HeartBeat(ilog logger.Log, gconfig Config) {
 	// send the heartbeat to the server
 	headers := make(map[string]string)
 	headers["Content-Type"] = "application/json"
-	headers["Authorization"] = "apikey " + gconfig.AppServer["apikey"].(string)
+	headers["Authorization"] = "apikey " + getAPIKey(gconfig)
 
 	_, err = CallWebService(appHeartBeatUrl, "POST", data, headers)
 
@@ -286,12 +334,11 @@ func CallWebService(url string, method string, data map[string]interface{}, head
 
 	resp, err := client.Do(req)
 	if err != nil {
-		//	fmt.Error("Error in WebServiceCallFunc.Execute: %s", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	respBody, err := ioutil.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	err = json.Unmarshal(respBody, &result)
 	if err != nil {
 		//	fmt.Error(fmt.Sprintf("Error:", err))
@@ -303,26 +350,43 @@ func CallWebService(url string, method string, data map[string]interface{}, head
 func GetHostandIPAddress() (map[string]interface{}, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		fmt.Println("Error getting hostname:", err)
+		ilog.Error(fmt.Sprintf("Error getting hostname: %v", err))
 		return nil, err
 	}
-	fmt.Println("Hostname: %s", hostname)
 
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		fmt.Println("Error getting IP addresses:", err)
+		ilog.Error(fmt.Sprintf("Error getting IP addresses: %v", err))
 		return nil, err
 	}
-	var ipnet *net.IPNet
 
+	var ipAddress string
+	// Find first non-loopback IPv4 address
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 			if ipnet.IP.To4() != nil {
-				fmt.Println("IPv4 address:", ipnet.IP.String())
-			} else {
-				fmt.Println("IPv6 address:", ipnet.IP.String())
+				ipAddress = ipnet.IP.String()
+				ilog.Debug(fmt.Sprintf("Found IPv4 address: %s", ipAddress))
+				break
 			}
 		}
+	}
+
+	// If no IPv4 found, try IPv6
+	if ipAddress == "" {
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				ipAddress = ipnet.IP.String()
+				ilog.Debug(fmt.Sprintf("Found IPv6 address: %s", ipAddress))
+				break
+			}
+		}
+	}
+
+	// Default to localhost if no address found
+	if ipAddress == "" {
+		ipAddress = "127.0.0.1"
+		ilog.Warn("No network address found, defaulting to 127.0.0.1")
 	}
 
 	osName := runtime.GOOS
@@ -330,7 +394,7 @@ func GetHostandIPAddress() (map[string]interface{}, error) {
 	nodedata := make(map[string]interface{})
 	nodedata["Host"] = hostname
 	nodedata["OS"] = osName
-	nodedata["IPAddress"] = ipnet.IP.String()
+	nodedata["IPAddress"] = ipAddress
 
 	return nodedata, nil
 }

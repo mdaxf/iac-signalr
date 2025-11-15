@@ -1,1 +1,72 @@
+# Binaries for programs and plugins
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Build outputs
+/build/
+/dist/
+/bin/
+*.exe
+*-linux
+*-darwin
+*-windows
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Log files
+*.log
+logs/
+
+# Configuration files with sensitive data
+signalrconfig.json
+dockersignalrconfig.json
+*.env
+.env.*
+!.env.example
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS specific
+Thumbs.db
+.DS_Store
+
+# Debug files
+debug
+__debug_bin
+
+# Application specific
+/public/uploads/
+/data/
