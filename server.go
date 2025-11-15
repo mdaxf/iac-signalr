@@ -9,8 +9,6 @@ import (
 	"io/ioutil"
 	"net"
 	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 
 	//	"log"
@@ -167,21 +165,30 @@ func main() {
 			fmt.Println(runHTTPClient(url, &receiver{}))
 		}() */
 	}()
+	/*
+		hip, err := GetHostandIPAddress()
 
-	hip, err := GetHostandIPAddress()
+		if err != nil {
+			ilog.Error(fmt.Sprintf("Failed to get host and ip address: %v", err))
+		}
+		for key, value := range hip {
+			nodedata[key] = value
+		}
+		if hip["Host"] != nil {
+			port := 0
+			if strings.Contains(address, ":") {
+				urls := strings.Split(address, ":")
+				if len(urls) == 2 {
+					p, err := strconv.Atoi(urls[1])
+					if err != nil {
+						ilog.Error(fmt.Sprintf("Failed to get port number: %v", err))
+					} else {
+						port = p
+					}
 
-	if err != nil {
-		ilog.Error(fmt.Sprintf("Failed to get host and ip address: %v", err))
-	}
-	for key, value := range hip {
-		nodedata[key] = value
-	}
-	if hip["Host"] != nil {
-		port := 0
-		if strings.Contains(address, ":") {
-			urls := strings.Split(address, ":")
-			if len(urls) == 2 {
-				p, err := strconv.Atoi(urls[1])
+				}
+			} else {
+				p, err := strconv.Atoi(address)
 				if err != nil {
 					ilog.Error(fmt.Sprintf("Failed to get port number: %v", err))
 				} else {
@@ -189,30 +196,21 @@ func main() {
 				}
 
 			}
-		} else {
-			p, err := strconv.Atoi(address)
-			if err != nil {
-				ilog.Error(fmt.Sprintf("Failed to get port number: %v", err))
-			} else {
-				port = p
+
+			if port > 0 {
+				nodedata["healthapi"] = fmt.Sprintf("http://%s:%d/health", hip["Host"], port)
 			}
-
 		}
-
-		if port > 0 {
-			nodedata["healthapi"] = fmt.Sprintf("http://%s:%d/health", hip["Host"], port)
-		}
-	}
-	// Start the heartbeat
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			HeartBeat(ilog, config)
-			time.Sleep(5 * time.Minute)
-		}
-	}()
-
+		// Start the heartbeat
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				HeartBeat(ilog, config)
+				time.Sleep(5 * time.Minute)
+			}
+		}()
+	*/
 	wg.Wait()
 
 	ch := make(chan struct{})
