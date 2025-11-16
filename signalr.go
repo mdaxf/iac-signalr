@@ -62,9 +62,9 @@ func (c *IACMessageBus) AddMessage(message string, topic string, sender string) 
 
 // add the client to the connection
 func (c *IACMessageBus) OnConnected(connectionID string) {
-	c.ilog.Debug(fmt.Sprintf("%s connected\n", connectionID))
+	c.ilog.Debug(fmt.Sprintf("%s connected", connectionID))
 	c.Groups().AddToGroup(groupname, connectionID)
-	fmt.Printf("%s connected and added to group %s\n", connectionID, groupname)
+	c.ilog.Info(fmt.Sprintf("%s connected and added to group %s", connectionID, groupname))
 }
 
 func (c *IACMessageBus) OnDisconnected(connectionID string) {

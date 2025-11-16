@@ -191,22 +191,8 @@ func (h *httpMux) handleWebsocket(writer http.ResponseWriter, request *http.Requ
 }
 
 func (h *httpMux) negotiate(w http.ResponseWriter, req *http.Request) {
-	//	fmt.Println("negotiate")
-	//	fmt.Println(req.Header)
-	//	fmt.Println(req.Header, req.Header.Get("negotiateVersion"))
-	//	fmt.Println(w.Header())
-	/*else if req.Method != "POST" || req.Method != "GET" {
-		fmt.Println("negotiate has bad method:", req.Method)
-		w.WriteHeader(http.StatusBadRequest)
-	} */
-
 	if req.Method == "OPTIONS" {
-		//	EnableCors(&w, req)
-
 		w.WriteHeader(http.StatusOK)
-		//	req1 := req
-		//	req1.Method = "POST"
-		//	h.negotiate(w, req1)
 	} else {
 		connectionID := newConnectionID()
 		connectionMapKey := connectionID
@@ -241,17 +227,14 @@ func (h *httpMux) negotiate(w http.ResponseWriter, req *http.Request) {
 					})
 			}
 		}
-		fmt.Println(connectionID, connectionToken, negotiateVersion, availableTransports)
 		response := negotiateResponse{
 			ConnectionToken:     connectionToken,
 			ConnectionID:        connectionID,
 			NegotiateVersion:    negotiateVersion,
 			AvailableTransports: availableTransports,
 		}
-		//	fmt.Println("negotiate response", response)
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(response) // Can't imagine an error when encoding
-		//	fmt.Println("negotiate response sent:", w.Header())
 
 	}
 }

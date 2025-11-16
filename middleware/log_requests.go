@@ -30,8 +30,7 @@ func LogRequests(h http.Handler) http.Handler {
 		method := r.Method
 		duration := time.Since(start)
 
-		fmt.Println(w.Header(), r.Header, r.Body)
-		// write to console
-		fmt.Printf("%03d %s %s %v \n", status, method, uri, duration)
+		// Simple structured log - only log essential request info
+		fmt.Printf("%03d %s %s %v\n", status, method, uri, duration)
 	})
 }
