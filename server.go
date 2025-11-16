@@ -30,6 +30,8 @@ type Config struct {
 	AppServer          map[string]interface{} `json:"appserver"`
 	Log                map[string]interface{} `json:"log"`
 	InsecureSkipVerify bool                   `json:"insecureSkipVerify"`
+	KeepAliveInterval  int                    `json:"keepAliveInterval"`  // in seconds, default 15
+	TimeoutInterval    int                    `json:"timeoutInterval"`    // in seconds, default 60
 }
 
 var ilog logger.Log
@@ -66,26 +68,38 @@ func secureCompare(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-func runHTTPServer(address string, hub signalr.HubInterface, clients string, insecureSkipVerify bool) {
+func runHTTPServer(address string, hub signalr.HubInterface, clients string, config Config) {
 	// Create SignalR logger adapter
 	logAdapter := logger.NewSignalRLogAdapter(ilog)
 
-	// Configure server with proper timeout settings
+	// Get timeout configuration with defaults
+	keepAlive := config.KeepAliveInterval
+	if keepAlive == 0 {
+		keepAlive = 15 // default 15 seconds
+	}
+	timeout := config.TimeoutInterval
+	if timeout == 0 {
+		timeout = 60 // default 60 seconds
+	}
+
+	// Configure server with proper timeout settings and WebSocket-only transport
+	// Force WebSocket transport to avoid SSE/long polling issues
 	// TimeoutInterval should be at least 2x KeepAliveInterval
 	server, err := signalr.NewServer(context.TODO(), signalr.SimpleHubFactory(hub),
 		signalr.Logger(logAdapter, false),
-		signalr.KeepAliveInterval(15*time.Second),
-		signalr.TimeoutInterval(30*time.Second),
+		signalr.HTTPTransports(signalr.TransportWebSockets), // Force WebSocket only
+		signalr.KeepAliveInterval(time.Duration(keepAlive)*time.Second),
+		signalr.TimeoutInterval(time.Duration(timeout)*time.Second),
 		signalr.HandshakeTimeout(15*time.Second),
 		signalr.AllowOriginPatterns([]string{clients}),
-		signalr.InsecureSkipVerify(insecureSkipVerify))
+		signalr.InsecureSkipVerify(config.InsecureSkipVerify))
 
 	if err != nil {
 		ilog.Error(fmt.Sprintf("Failed to create SignalR server: %v", err))
 		return
 	}
 
-	ilog.Info(fmt.Sprintf("SignalR server configured - KeepAlive: 15s, Timeout: 30s, InsecureSkipVerify: %v", insecureSkipVerify))
+	ilog.Info(fmt.Sprintf("SignalR server configured - Transport: WebSocket-only, KeepAlive: %ds, Timeout: %ds, InsecureSkipVerify: %v", keepAlive, timeout, config.InsecureSkipVerify))
 
 	signalr.AllowedClients = clients
 
@@ -214,7 +228,7 @@ func main() {
 			ilog: ilog,
 		}
 
-		go runHTTPServer(address, hub, clients, config.InsecureSkipVerify)
+		go runHTTPServer(address, hub, clients, config)
 		<-time.After(time.Millisecond * 2)
 		/*	go func() {
 			fmt.Println(runHTTPClient(url, &receiver{}))
