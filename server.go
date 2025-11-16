@@ -70,15 +70,22 @@ func runHTTPServer(address string, hub signalr.HubInterface, clients string, ins
 	// Create SignalR logger adapter
 	logAdapter := logger.NewSignalRLogAdapter(ilog)
 
+	// Configure server with proper timeout settings
+	// TimeoutInterval should be at least 2x KeepAliveInterval
 	server, err := signalr.NewServer(context.TODO(), signalr.SimpleHubFactory(hub),
 		signalr.Logger(logAdapter, false),
-		signalr.KeepAliveInterval(10*time.Second), signalr.AllowOriginPatterns([]string{clients}),
+		signalr.KeepAliveInterval(15*time.Second),
+		signalr.TimeoutInterval(30*time.Second),
+		signalr.HandshakeTimeout(15*time.Second),
+		signalr.AllowOriginPatterns([]string{clients}),
 		signalr.InsecureSkipVerify(insecureSkipVerify))
 
 	if err != nil {
 		ilog.Error(fmt.Sprintf("Failed to create SignalR server: %v", err))
 		return
 	}
+
+	ilog.Info(fmt.Sprintf("SignalR server configured - KeepAlive: 15s, Timeout: 30s, InsecureSkipVerify: %v", insecureSkipVerify))
 
 	signalr.AllowedClients = clients
 
