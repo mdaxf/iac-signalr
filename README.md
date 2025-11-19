@@ -42,6 +42,12 @@ Create a `signalrconfig.json` file (or copy from `signalrconfig.json.example`):
     "address": "0.0.0.0:8222",
     "clients": "http://127.0.0.1:8080,https://127.0.0.1:8080",
     "insecureSkipVerify": false,
+    "keepAliveInterval": 15,
+    "timeoutInterval": 60,
+    "auth": {
+        "enabled": true,
+        "token": "your-secure-token-here"
+    },
     "appserver": {
         "url": "http://127.0.0.1:8080",
         "apikey": "your-secret-api-key"
@@ -62,7 +68,9 @@ The server supports the following environment variables (which override configur
 - `SIGNALR_CONFIG`: Path to configuration file (default: `signalrconfig.json`)
 - `SIGNALR_ADDRESS`: Server listen address (e.g., `0.0.0.0:8222`)
 - `SIGNALR_CLIENTS`: Allowed client origins (comma-separated)
-- `SIGNALR_API_KEY`: API key for authentication (recommended over config file)
+- `SIGNALR_API_KEY`: API key for health endpoint authentication (recommended over config file)
+- `SIGNALR_AUTH_ENABLED`: Set to `true` to enable SignalR connection authorization
+- `SIGNALR_AUTH_TOKEN`: Token for SignalR connection authorization (recommended over config file)
 - `SIGNALR_INSECURE_SKIP_VERIFY`: Set to `true` to disable origin verification (not recommended for production)
 
 ### Running the Server
@@ -184,14 +192,68 @@ Log levels (from most to least severe):
 - `info`
 - `debug`
 
+## Authorization
+
+### SignalR Connection Authorization
+
+The server supports token-based authorization for SignalR connections. When enabled, clients must provide a valid token to establish connections and exchange data.
+
+#### Configuration
+
+Enable authorization in `signalrconfig.json`:
+
+```json
+{
+    "auth": {
+        "enabled": true,
+        "token": "your-secure-token-here"
+    }
+}
+```
+
+Or use environment variables (recommended):
+
+```bash
+export SIGNALR_AUTH_ENABLED=true
+export SIGNALR_AUTH_TOKEN=your-secure-token-here
+```
+
+#### Client Authentication
+
+Clients can provide the token in two ways:
+
+**1. Authorization Header (Recommended)**:
+```javascript
+const connection = new signalR.HubConnectionBuilder()
+    .withUrl("/iacmessagebus", {
+        accessTokenFactory: () => "your-secure-token-here"
+    })
+    .build();
+```
+
+**2. Query Parameter**:
+```javascript
+const connection = new signalR.HubConnectionBuilder()
+    .withUrl("/iacmessagebus?access_token=your-secure-token-here")
+    .build();
+```
+
+#### Behavior
+
+- **When enabled**: All connection attempts (negotiate, WebSocket, SSE) require a valid token
+- **Invalid/missing token**: Connection is rejected with HTTP 401 Unauthorized
+- **When disabled**: No token validation is performed (not recommended for production)
+
 ## Security Best Practices
 
-1. **Always use environment variables** for sensitive data (API keys, connection strings)
-2. **Enable HTTPS** in production environments
-3. **Set `insecureSkipVerify: false`** in production
-4. **Restrict CORS origins** to only trusted domains
-5. **Use strong API keys** (at least 32 characters, random)
-6. **Keep dependencies updated** regularly
+1. **Always use environment variables** for sensitive data (API keys, tokens, connection strings)
+2. **Enable SignalR authorization** in production environments
+3. **Enable HTTPS** in production environments
+4. **Set `insecureSkipVerify: false`** in production
+5. **Restrict CORS origins** to only trusted domains
+6. **Use strong tokens/API keys** (at least 32 characters, random)
+7. **Rotate tokens regularly** and implement token expiration if needed
+8. **Keep dependencies updated** regularly
 
 ## Development
 
@@ -245,9 +307,17 @@ iac-signalr/
 
 ### Authentication Failures
 
+**Health Endpoint (/health)**:
 1. Verify API key is correctly set in environment or config
 2. Check Authorization header format: `apikey <your-key>`
 3. Ensure no whitespace or special characters in the API key
+
+**SignalR Connections**:
+1. Check if authorization is enabled (`SIGNALR_AUTH_ENABLED=true`)
+2. Verify token is correctly provided via Authorization header or query parameter
+3. Ensure token matches the configured value exactly (case-sensitive)
+4. Check browser console for 401 Unauthorized errors
+5. Verify client is using `accessTokenFactory` or `access_token` query parameter
 
 ### Performance Issues
 
@@ -277,6 +347,24 @@ For issues and questions:
 - Review the chat sample application for implementation guidance
 
 ## Changelog
+
+### Version 1.1.0 (2025-01-19)
+
+#### New Features
+- **SignalR Connection Authorization**: Added token-based authorization for SignalR connections
+  - Configurable via `auth.enabled` and `auth.token` in config or environment variables
+  - Supports both Authorization header (Bearer token) and query parameter authentication
+  - Validates tokens on negotiate, WebSocket, and SSE endpoints
+  - Uses constant-time comparison to prevent timing attacks
+
+#### Security Improvements
+- Added `SIGNALR_AUTH_ENABLED` and `SIGNALR_AUTH_TOKEN` environment variables
+- Unauthorized connection attempts are rejected with HTTP 401
+
+#### Documentation
+- Added comprehensive authorization documentation to README
+- Updated configuration examples with auth settings
+- Added troubleshooting guide for authentication issues
 
 ### Version 1.0.0 (2025-01-15)
 

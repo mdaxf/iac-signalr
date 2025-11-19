@@ -46,6 +46,7 @@ type server struct {
 	groupManager      GroupManager
 	reconnectAllowed  bool
 	transports        []TransportType
+	authValidator     func(*http.Request) bool
 }
 
 var AllowedClients string
@@ -104,6 +105,7 @@ func WithHTTPServeMux(serveMux *http.ServeMux) func() MappableRouter {
 // MapHTTP maps the servers' hub to a path in a MappableRouter
 func (s *server) MapHTTP(routerFactory func() MappableRouter, path string) {
 	httpMux := newHTTPMux(s)
+	httpMux.authValidator = s.authValidator
 	router := routerFactory()
 	/*	router.HandleFunc(fmt.Sprintf("%s/negotiate", path), httpMux.negotiate)
 		router.Handle(path, httpMux)

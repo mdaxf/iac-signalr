@@ -3,6 +3,7 @@ package signalr
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 )
 
@@ -74,5 +75,18 @@ func AllowOriginPatterns(origins []string) func(Party) error {
 	return func(p Party) error {
 		p.setOriginPatterns(origins)
 		return nil
+	}
+}
+
+// AuthValidator sets the authorization validator function that will be called
+// to validate incoming requests before establishing SignalR connections.
+// The validator function should return true if the request is authorized, false otherwise.
+func AuthValidator(validator func(*http.Request) bool) func(Party) error {
+	return func(p Party) error {
+		if s, ok := p.(*server); ok {
+			s.authValidator = validator
+			return nil
+		}
+		return errors.New("option AuthValidator is server only")
 	}
 }

@@ -32,6 +32,7 @@ type Config struct {
 	InsecureSkipVerify bool                   `json:"insecureSkipVerify"`
 	KeepAliveInterval  int                    `json:"keepAliveInterval"`  // in seconds, default 15
 	TimeoutInterval    int                    `json:"timeoutInterval"`    // in seconds, default 60
+	Auth               map[string]interface{} `json:"auth"`
 }
 
 var ilog logger.Log
@@ -68,6 +69,63 @@ func secureCompare(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
+// getAuthToken retrieves the auth token from environment variable or config
+func getAuthToken(config Config) string {
+	// First try environment variable for security
+	if token := os.Getenv("SIGNALR_AUTH_TOKEN"); token != "" {
+		return token
+	}
+	// Fall back to config
+	if config.Auth != nil {
+		if token, ok := config.Auth["token"].(string); ok {
+			return token
+		}
+	}
+	return ""
+}
+
+// isAuthEnabled checks if authentication is enabled in config
+func isAuthEnabled(config Config) bool {
+	// Check environment variable first
+	if enabled := os.Getenv("SIGNALR_AUTH_ENABLED"); enabled != "" {
+		return enabled == "true"
+	}
+	// Fall back to config
+	if config.Auth != nil {
+		if enabled, ok := config.Auth["enabled"].(bool); ok {
+			return enabled
+		}
+	}
+	return false
+}
+
+// validateAuthToken validates the provided token against configured token
+func validateAuthToken(providedToken string, config Config) bool {
+	if !isAuthEnabled(config) {
+		return true // Auth disabled, allow all
+	}
+	expectedToken := getAuthToken(config)
+	if expectedToken == "" {
+		return false // Auth enabled but no token configured
+	}
+	return secureCompare(providedToken, expectedToken)
+}
+
+// extractToken extracts token from Authorization header or query parameter
+func extractToken(r *http.Request) string {
+	// Try Authorization header first (Bearer token format)
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		// Support both "Bearer <token>" and just "<token>"
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			return strings.TrimPrefix(authHeader, "Bearer ")
+		}
+		return authHeader
+	}
+	// Fall back to query parameter
+	return r.URL.Query().Get("access_token")
+}
+
 func runHTTPServer(address string, hub signalr.HubInterface, clients string, config Config) {
 	// Create SignalR logger adapter
 	logAdapter := logger.NewSignalRLogAdapter(ilog)
@@ -92,14 +150,19 @@ func runHTTPServer(address string, hub signalr.HubInterface, clients string, con
 		signalr.TimeoutInterval(time.Duration(timeout)*time.Second),
 		signalr.HandshakeTimeout(15*time.Second),
 		signalr.AllowOriginPatterns([]string{clients}),
-		signalr.InsecureSkipVerify(config.InsecureSkipVerify))
+		signalr.InsecureSkipVerify(config.InsecureSkipVerify),
+		signalr.AuthValidator(func(r *http.Request) bool {
+			token := extractToken(r)
+			return validateAuthToken(token, config)
+		}))
 
 	if err != nil {
 		ilog.Error(fmt.Sprintf("Failed to create SignalR server: %v", err))
 		return
 	}
 
-	ilog.Info(fmt.Sprintf("SignalR server configured - Transport: WebSocket-only, KeepAlive: %ds, Timeout: %ds, InsecureSkipVerify: %v", keepAlive, timeout, config.InsecureSkipVerify))
+	authEnabled := isAuthEnabled(config)
+	ilog.Info(fmt.Sprintf("SignalR server configured - Transport: WebSocket-only, KeepAlive: %ds, Timeout: %ds, InsecureSkipVerify: %v, Auth: %v", keepAlive, timeout, config.InsecureSkipVerify, authEnabled))
 
 	signalr.AllowedClients = clients
 

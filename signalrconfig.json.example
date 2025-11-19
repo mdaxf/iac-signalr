@@ -4,6 +4,10 @@
     "insecureSkipVerify": true,
     "keepAliveInterval": 15,
     "timeoutInterval": 60,
+    "auth": {
+        "enabled": true,
+        "token": "your-secure-token-here"
+    },
     "appserver":{
         "url": "http://127.0.0.1:8080",
         "apikey": "your-secret-api-key-here"

@@ -19,6 +19,7 @@ type httpMux struct {
 	mx            sync.RWMutex
 	connectionMap map[string]Connection
 	server        Server
+	authValidator func(*http.Request) bool
 }
 
 func newHTTPMux(server Server) *httpMux {
@@ -93,6 +94,11 @@ func (h *httpMux) handleGet(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (h *httpMux) handleServerSentEvent(writer http.ResponseWriter, request *http.Request) {
+	// Validate authorization if auth validator is set
+	if h.authValidator != nil && !h.authValidator(request) {
+		writer.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	connectionID := request.URL.Query().Get("id")
 	if connectionID == "" {
 		writer.WriteHeader(http.StatusBadRequest)
@@ -146,6 +152,11 @@ func (h *httpMux) handleServerSentEvent(writer http.ResponseWriter, request *htt
 }
 
 func (h *httpMux) handleWebsocket(writer http.ResponseWriter, request *http.Request) {
+	// Validate authorization if auth validator is set
+	if h.authValidator != nil && !h.authValidator(request) {
+		http.Error(writer, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	accOptions := &websocket.AcceptOptions{
 		CompressionMode:    websocket.CompressionContextTakeover,
 		InsecureSkipVerify: h.server.insecureSkipVerify(),
@@ -194,6 +205,11 @@ func (h *httpMux) negotiate(w http.ResponseWriter, req *http.Request) {
 	if req.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 	} else {
+		// Validate authorization if auth validator is set
+		if h.authValidator != nil && !h.authValidator(req) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		connectionID := newConnectionID()
 		connectionMapKey := connectionID
 		negotiateVersion, err := strconv.Atoi(req.Header.Get("negotiateVersion"))
