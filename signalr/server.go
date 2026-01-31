@@ -118,10 +118,9 @@ func (s *server) MapHTTP(routerFactory func() MappableRouter, path string) {
 
 	router.Handle(path, otherRouteHandler)
 
-	router.Handle("*", otherRouteHandler)
-	//	fmt.Println("MapHTTP", path, otherRouteHandler)
-	//
-	// router.Handle(path, httpMux)
+	// Note: Removed invalid "*" pattern - it's not valid for Go's http.ServeMux (Go 1.22+)
+	// The path handler above already handles the hub path
+	// router.Handle("*", otherRouteHandler) // Invalid pattern, causes panic
 }
 func EnableCors(w *http.ResponseWriter, r *http.Request) {
 	allowedOrigins := strings.Split(AllowedClients, ",")

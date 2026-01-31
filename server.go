@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,8 +31,8 @@ type Config struct {
 	AppServer          map[string]interface{} `json:"appserver"`
 	Log                map[string]interface{} `json:"log"`
 	InsecureSkipVerify bool                   `json:"insecureSkipVerify"`
-	KeepAliveInterval  int                    `json:"keepAliveInterval"`  // in seconds, default 15
-	TimeoutInterval    int                    `json:"timeoutInterval"`    // in seconds, default 60
+	KeepAliveInterval  int                    `json:"keepAliveInterval"` // in seconds, default 15
+	TimeoutInterval    int                    `json:"timeoutInterval"`   // in seconds, default 60
 }
 
 var ilog logger.Log
@@ -91,7 +92,7 @@ func runHTTPServer(address string, hub signalr.HubInterface, clients string, con
 		signalr.KeepAliveInterval(time.Duration(keepAlive)*time.Second),
 		signalr.TimeoutInterval(time.Duration(timeout)*time.Second),
 		signalr.HandshakeTimeout(15*time.Second),
-		signalr.AllowOriginPatterns([]string{clients}),
+		signalr.AllowOriginPatterns(strings.Split(clients, ",")),
 		signalr.InsecureSkipVerify(config.InsecureSkipVerify))
 
 	if err != nil {
