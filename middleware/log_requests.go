@@ -6,6 +6,14 @@ import (
 	"time"
 )
 
+// silentPaths are endpoints polled frequently by health monitors.
+// Successful (2xx) requests to these paths are suppressed to avoid flooding logs.
+var silentPaths = map[string]bool{
+	"/":       true,
+	"/health": true,
+	"/status": true,
+}
+
 func EnableCors(w *http.ResponseWriter) {
 	(*w).Header().Set("Access-Control-Allow-Origin", "http://127.0.0.1:8080")
 	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -13,24 +21,25 @@ func EnableCors(w *http.ResponseWriter) {
 	(*w).Header().Set("Access-Control-Allow-Credentials", "true")
 }
 
-// LogRequests writes simple request logs to STDOUT so that we can see what requests the server is handling
+// LogRequests writes simple request logs to STDOUT.
+// Successful (2xx) requests to health-check paths (/, /health, /status) are
+// suppressed to avoid flooding logs with heartbeat noise.
+// Non-2xx responses are always logged so errors are visible.
 func LogRequests(h http.Handler) http.Handler {
-	// type our middleware as an http.HandlerFunc so that it is seen as an http.Handler
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// wrap the original response writer so we can capture response details
 		wrappedWriter := wrapResponseWriter(w)
-		start := time.Now() // request start time
+		start := time.Now()
 		EnableCors(&w)
-		// serve the inner request
 		h.ServeHTTP(wrappedWriter, r)
 
-		// extract request/response details
 		status := wrappedWriter.status
-		uri := r.URL.String()
-		method := r.Method
 		duration := time.Since(start)
 
-		// Simple structured log - only log essential request info
-		fmt.Printf("%03d %s %s %v\n", status, method, uri, duration)
+		// Suppress successful health-check noise; always surface errors
+		if silentPaths[r.URL.Path] && status >= 200 && status < 300 {
+			return
+		}
+
+		fmt.Printf("%03d %s %s %v\n", status, r.Method, r.URL.String(), duration)
 	})
 }

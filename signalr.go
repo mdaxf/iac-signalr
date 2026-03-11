@@ -32,14 +32,35 @@ type IACMessageBus struct {
 
 var groupname = "IAC_Internal_MessageBus"
 
+// uiGroupname is the group that only frontend (UI) clients join.
+// Backend Go clients (iac-main) never join this group, so agent progress/chat
+// broadcasts sent here will never be received by the backend client — avoiding
+// the "Unknown method" completion that previously caused disconnections.
+var uiGroupname = "IAC_UI_MessageBus"
+
 func (c *IACMessageBus) Subscribe(topic string, connectionID string) {
-	//fmt.Printf("Subscribe: topic: %s, sender: %s\n", topic, connectionID)
 	c.ilog.Debug(fmt.Sprintf("Subscribe: topic: %s, sender: %s\n", topic, connectionID))
 }
+
+// SubscribeUI adds the calling connection to the UI-only broadcast group.
+// Frontend clients call this once after connecting so they receive agent
+// progress and chat stream messages.
+func (c *IACMessageBus) SubscribeUI(connectionID string) {
+	c.ilog.Info(fmt.Sprintf("SubscribeUI: connectionID=%s joining group %s", connectionID, uiGroupname))
+	c.Groups().AddToGroup(uiGroupname, connectionID)
+}
+
 func (c *IACMessageBus) Send(topic string, message string, connectionID string) {
-	c.ilog.Debug(fmt.Sprintf("Send: topic: %s, message: %s, sender: %s\n", topic, message, connectionID))
+	c.ilog.Info(fmt.Sprintf("Send: topic: %s, sender: %s\n", topic, connectionID))
 	c.Clients().Group(groupname).Send(topic, message)
-	//	c.Clients().Caller().Send("receive", message)
+}
+
+// SendToUI broadcasts topic+message to the IAC_UI_MessageBus group only.
+// Called by iac-main backend to push agent progress/chat events to frontend clients.
+// Backend Go clients do not join this group, so they never see these messages.
+func (c *IACMessageBus) SendToUI(topic string, message string, connectionID string) {
+	c.ilog.Info(fmt.Sprintf("SendToUI: topic: %s, sender: %s\n", topic, connectionID))
+	c.Clients().Group(uiGroupname).Send(topic, message)
 }
 
 func (c *IACMessageBus) SendToBackEnd(topic string, message string, connectionID string) {
@@ -67,8 +88,9 @@ func (c *IACMessageBus) OnConnected(connectionID string) {
 }
 
 func (c *IACMessageBus) OnDisconnected(connectionID string) {
-	c.ilog.Info(fmt.Sprintf("Client %s disconnected from group %s", connectionID, groupname))
+	c.ilog.Info(fmt.Sprintf("Client %s disconnected from groups %s and %s", connectionID, groupname, uiGroupname))
 	c.Groups().RemoveFromGroup(groupname, connectionID)
+	c.Groups().RemoveFromGroup(uiGroupname, connectionID)
 }
 
 func (c *IACMessageBus) Broadcast(message string) {

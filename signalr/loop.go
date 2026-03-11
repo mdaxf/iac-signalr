@@ -194,9 +194,13 @@ func (l *loop) handleInvocationMessage(invocation invocationMessage) {
 
 	// Transient hub, dispatch invocation here
 	if method, ok := getMethod(l.party.invocationTarget(l.hubConn), invocation.Target); !ok {
-		// Unable to find the method
-		_ = l.info.Log(evt, "getMethod", "error", "missing method", "name", invocation.Target, react, "send completion with error")
-		_ = l.hubConn.Completion(invocation.InvocationID, nil, fmt.Sprintf("Unknown method %s", invocation.Target))
+		// Unable to find the method.
+		// For fire-and-forget invocations (InvocationID == ""), do NOT send a completion error back.
+		// The server has no matching InvocationID and would close the connection on an unexpected completion.
+		_ = l.info.Log(evt, "getMethod", "error", "missing method", "name", invocation.Target, react, "ignored (fire-and-forget)")
+		if invocation.InvocationID != "" {
+			_ = l.hubConn.Completion(invocation.InvocationID, nil, fmt.Sprintf("Unknown method %s", invocation.Target))
+		}
 	} else if in, err := buildMethodArguments(method, invocation, l.streamClient, l.protocol); err != nil {
 		// argument build failed
 		_ = l.info.Log(evt, "buildMethodArguments", "error", err, "name", invocation.Target, react, "send completion with error")
